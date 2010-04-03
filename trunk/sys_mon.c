@@ -15,8 +15,13 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <malloc.h>
+#include <signal.h>
+#include <grp.h>
+#include <pwd.h>
 
 #define STACKSIZE 32768
+
+const int long_size = sizeof(long);
 
 void print_regs(struct user_regs_struct *regs) {
   fprintf(stderr, "Register Contents: eax: %lu ebx: %ld ecx: %ld edx: %ld\n", 
@@ -25,12 +30,38 @@ void print_regs(struct user_regs_struct *regs) {
   return;
 }
 
+void setdata(pid_t child, long addr, char *str, int len)
+{   char *laddr;
+    int i, j;
+    union u {
+            long val;
+            char chars[long_size];
+    }data;
+    i = 0;
+    j = len / long_size;
+    laddr = str;
+    while(i < j) {
+        memcpy(data.chars, laddr, long_size);
+        ptrace(PTRACE_POKEDATA, child,
+               addr + i * 4, data.val);
+        ++i;
+        laddr += long_size;
+    }
+    j = len % long_size;
+    if(j != 0) {
+        memcpy(data.chars, laddr, j);
+        ptrace(PTRACE_POKEDATA, child,
+               addr + i * 4, data.val);
+    }
+}
+
+
+
 void getdata(pid_t child, long addr,char *str)
 {  
 
   char *laddr;
   int i, j;
-  const int long_size = sizeof(long);
 
   union u {
           long val;
@@ -63,86 +94,180 @@ void worker_thread(void *arg) {
   struct user_regs_struct regs;
   int status;
   long orig_eax;
-  int in_clone_call = 0, in_open_call = 0;
+  char in_clone_call = 0, in_open_call = 0;
+  char in_uid_call = 0, in_gid_call = 0;
+  char in_write_call = 0;
+  char trace_open = 0;
   int child_id = 0;
   void **child_stack = NULL;  
+  struct group *grp_ptr;
+  struct passwd *pwd_ptr;
+  char *usr_name = NULL, *grp_name = NULL;
   char str[80];
     
   traced_proc = (pid_t)arg;
-  printf("Traced proc: %d\n", traced_proc);
+  printf("Tracing Proc: %d\n", traced_proc);
   
   if(ptrace(PTRACE_ATTACH, traced_proc, NULL, NULL) == -1) {
     printf("Unable to attach to process %d\n", traced_proc);
     _exit(1);
   }
 
+  waitpid(traced_proc, &status, 0);
+  ptrace(PTRACE_SYSCALL, traced_proc, NULL, NULL);
+
   while(1) {
 
-    /*child_id = wait(&status);
+    child_id = wait(&status);
       
     if(child_id == traced_proc) {
       if(WIFEXITED(status)) 
         break;     
+      if(WIFSTOPPED(status)) {
+        if(WSTOPSIG(status) != SIGTRAP) 
+          goto child_cont;
+      }
     } else {
       continue;
-    }*/
-
-    waitpid(traced_proc, &status, 0);
-    if(WIFEXITED(status)) 
-        break;     
-
-    orig_eax = ptrace(PTRACE_PEEKUSER, traced_proc, 4 * ORIG_EAX, NULL);
-
-    if(orig_eax == __NR_clone) {
-      if(in_clone_call == 0) {
-        in_clone_call = 1;
-        ptrace(PTRACE_GETREGS, traced_proc, NULL, &regs);    
-        print_regs(&regs);
-        //getdata(traced_proc, regs.ebx, str);
-        //printf("Filename: %s\n", str);
-      } else {
-        //fprintf(stderr, "exiting clone call..\n");
-        write(2, "exit clone", 11);
-        in_clone_call = 0;
-        ptrace(PTRACE_GETREGS, traced_proc, NULL, &regs);    
-        print_regs(&regs);
-        
-        child_stack = (void **)malloc(STACKSIZE);
-        if(child_stack == NULL) {
-          perror("Unable to create child stack. Exiting\n");
-          _exit(1);
-        }
-
-        child_stack = (void **)(STACKSIZE + (char *)child_stack);
-
-        child_id = clone(worker_thread, child_stack, SIGCHLD, (void *)regs.eax);
-
-        if(child_id <= 0) {
-          perror("Clone call failed. Exiting\n");
-          _exit(1);
-        }
-
-        fprintf(stderr, "PID: %d - Cloned child with id: %d for process %d\n", getpid(), child_id, traced_proc);
-
-        child_id = 0;
-        child_stack = NULL;
-      }
-    } else if(orig_eax == __NR_open) {
-       if(in_open_call == 0) {
-        in_open_call = 1;
-        ptrace(PTRACE_GETREGS, traced_proc, NULL, &regs);    
-        print_regs(&regs);
-        getdata(traced_proc, regs.ebx, str);
-        fprintf(stderr, "Filename: %s\n", str);
-      } else {
-        fprintf(stderr, "exiting open call..\n");
-        write(2, "exit open", 10);
-        in_open_call = 0;
-        ptrace(PTRACE_GETREGS, traced_proc, NULL, &regs);    
-        //print_regs(&regs);
-      }
     }
 
+    ptrace(PTRACE_GETREGS, traced_proc, NULL, &regs);
+
+    switch(regs.orig_eax) {
+      case __NR_clone:
+        {
+          if(in_clone_call == 0) {
+            in_clone_call = 1;
+          } else {
+            in_clone_call = 0;	
+
+            child_stack = (void **)malloc(STACKSIZE);
+            if(child_stack == NULL) {
+              perror("Unable to create child stack. Exiting\n");
+              _exit(1);
+            }
+
+            if(regs.eax > 0) {
+              child_stack = (void **)(STACKSIZE + (char *)child_stack);
+              child_id = clone(worker_thread, child_stack, SIGCHLD, (void *)regs.eax);
+            }
+
+            if(child_id <= 0) {
+              perror("Clone call failed. Exiting\n");
+              _exit(1);
+            }
+                        
+            child_id = 0;
+            child_stack = NULL;
+          }   
+        } 
+        break;
+      case __NR_open: 
+        {
+          if(trace_open) {
+            if(in_open_call == 0) {
+              in_open_call = 1;
+              printf("Open:\n");              
+
+              /* 
+                 ebx: addr of filename
+                 ecx: flags
+                 edx: mode
+              */
+
+              getdata(traced_proc, regs.ebx, str);
+              fprintf(stderr, "Filename: %s\n", str);
+
+              if(0) {
+                setdata(traced_proc, regs.ebx, "1", 9);              
+              }
+            } else {
+              in_open_call = 0;
+            }          
+          }
+        }
+        break; 
+  
+      case __NR_setuid32:
+        {
+          if(in_uid_call == 0) {
+            pwd_ptr = NULL;
+            pwd_ptr = getpwuid(regs.ebx);
+
+            if(pwd_ptr != NULL) {
+              printf("Proc: %d UID: %s ebx: %d\n", traced_proc, pwd_ptr->pw_name, regs.ebx);
+            }
+            else {
+              printf("UID does not exist\n");
+              break;
+            }
+
+            if(usr_name != NULL)
+              free(usr_name);
+
+            usr_name = malloc(strlen(pwd_ptr->pw_name)+1);
+            strcpy(usr_name, pwd_ptr->pw_name);
+
+            in_uid_call = 1;
+          } else {
+            in_uid_call = 0;
+          }
+        }
+        break;
+
+      case __NR_setgid32:
+        {
+          if(in_gid_call == 0) {
+            grp_ptr = NULL;
+            grp_ptr = getgrgid(regs.ebx);
+
+            if(grp_ptr != NULL) {
+              //printf("Proc: %d GID: %s ebx: %d\n", traced_proc, grp_ptr->gr_name, regs.ebx);
+            }
+            else {
+              printf("Group does not exist\n");
+              break;
+            }
+
+            if(grp_name != NULL)
+              free(grp_name);
+
+            grp_name = malloc(strlen(grp_ptr->gr_name)+1);
+            strcpy(grp_name, grp_ptr->gr_name);
+
+            in_gid_call = 1;
+          } else {
+            in_gid_call = 0;
+          }
+        }
+        break;
+
+      case __NR_write:
+        {
+          if(!trace_open || in_write_call) {
+            if(in_write_call == 0) {
+              getdata(traced_proc, regs.ecx, str);
+              
+              if(strstr(str, "Login successful")) {           
+                trace_open = 1;
+                printf("PID: %d Write: %s\n", traced_proc, str);
+              }
+
+              in_write_call = 1;
+            } else {
+              in_write_call = 0;
+            }
+          }
+        }
+        break;
+
+      default:
+        //perror("Unknown system call\n");
+        break;
+    }
+
+
+child_cont:
     ptrace(PTRACE_SYSCALL, traced_proc, NULL, NULL);
   }
 }
