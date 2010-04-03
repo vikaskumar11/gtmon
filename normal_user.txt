@@ -1,0 +1,5 @@
+hello.txt 1 1
+vikas.txt 1 1
+venkat.txt 1 0
+text.txt 1 0
+CREATE 4 0
