@@ -16,8 +16,11 @@
 #include <string.h>
 #include <malloc.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <grp.h>
 #include <pwd.h>
+
+#include "file.c"
 
 #define STACKSIZE 32768
 
@@ -166,6 +169,8 @@ void worker_thread(void *arg) {
         {
           if(trace_open) {
             if(in_open_call == 0) {
+              int flags = 0, ret = 0;
+
               in_open_call = 1;
               printf("Open:\n");              
 
@@ -174,13 +179,27 @@ void worker_thread(void *arg) {
                  ecx: flags
                  edx: mode
               */
-
+              
               getdata(traced_proc, regs.ebx, str);
-              fprintf(stderr, "Filename: %s\n", str);
+              fprintf(stderr, "Filename: %s ecx: %ld\n", str, regs.ecx);
+	      
+              if((regs.ecx & O_CREAT) == O_CREAT) 
+                flags = 4;
+              else if((regs.ecx & O_RDWR) == O_RDWR)
+                flags = 3;
+              else if((regs.ecx & O_WRONLY) == O_WRONLY)
+                flags = 2;
+              else if((regs.ecx & O_RDONLY) == O_RDONLY) 
+                flags = 1;
+              else
+                flags = 0;
 
-              if(0) {
+	      printf("Flags: %d\n", flags);
+              if(!(ret=is_access_allowed(str, usr_name, grp_name, flags)) ||
+			ret == -1) {
                 setdata(traced_proc, regs.ebx, "1", 9);              
               }
+
             } else {
               in_open_call = 0;
             }          
@@ -195,7 +214,7 @@ void worker_thread(void *arg) {
             pwd_ptr = getpwuid(regs.ebx);
 
             if(pwd_ptr != NULL) {
-              printf("Proc: %d UID: %s ebx: %d\n", traced_proc, pwd_ptr->pw_name, regs.ebx);
+              printf("Proc: %d UID: %s ebx: %ld\n", traced_proc, pwd_ptr->pw_name, regs.ebx);
             }
             else {
               printf("UID does not exist\n");
