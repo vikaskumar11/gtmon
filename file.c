@@ -102,60 +102,69 @@ int check_permissions(char *role, char *file_name, int operation)
      char fname[50] = "";
      FILE *fp;
      int ret;
-     int op;
+     int op, orig_op = 0;
      int allow;
 
      sprintf(role_file, "%s.txt", role);
      fp = fopen(role_file, "r");
      if(NULL == fp)
      {
-	  perror("fopen");
-	  exit(1);
-     }
-
-     if(NULL == file_name)
-     {
-	  file_name = "CREATE";
-     }
+      perror("fopen");
+      exit(1);
+     }     
+	
+     printf("flags=[%d]\n", operation);     
 
      while(1)
      {
-	  ret = fscanf(fp, "%s %d %d \n", fname, &op, &allow);
-	  printf("%s %d %d", fname, op, allow);
-	  if(0 == strcmp(fname, file_name))
-	  {
-	       if((op & operation) && allow)
-		    return 1;
-	       else if ((op & operation) && !allow)
-		    return 0;
-	  }	
-	  memset(fname, 0, 50);
-	  if(EOF == ret)
-	       return -1;
+        ret = fscanf(fp, "%s %d %d \n", fname, &op, &allow);
+        printf("%s %d %d", fname, op, allow);
+        if(0 == strcmp(fname, file_name))
+        {
+            printf("matched\n");
+
+            if(operation == 4 && (op && 8))
+              return allow;
+            else if((op & operation))
+              return allow;
+        }	
+
+        memset(fname, 0, 50);
+        if(EOF == ret)
+        {
+           if(operation == 4 && allow == 1)
+              return allow;
+           else
+             return -1;
+        }
      }
 }
 
-int main(int argc, char* argv[])
+int is_access_allowed(char *filename, char *usr_name, char *grp_name, int flags)
 {
      int i;
-     char *usr_name = argv[1];
-     char *group_name = argv[2];
      role_set r;
      int allow;
      
+
+     if(filename == NULL || usr_name == NULL || grp_name == NULL) {
+       printf("%s(): Invalid parameters\n", __FUNCTION__);
+       return 0;
+     }
+
      memset(&r, 0, sizeof(r));
 
-     find_roles(&r, usr_name, group_name);
+     find_roles(&r, usr_name, grp_name);
 
      for(i = 0; i < 3; i++)
      {
 	  if(NULL != r.role[i])
 	  {
 	       printf("\nrole=[%s]\n", r.role[i]);
-	       allow = check_permissions(r.role[i], argv[3], atoi(argv[4]));
+	       allow = check_permissions(r.role[i], filename, flags);
 	       if(-1 == allow)
 	       {
-		    printf("Requested file [%s] not found in RBAC\n", argv[3]);
+		    printf("Requested file [%s] not found in RBAC\n", filename);
 	       }
 	       else if (0 == allow)
 		    break;
@@ -163,5 +172,6 @@ int main(int argc, char* argv[])
      }
 
      printf("allowed = [%d]\n", allow);     
-     return 0;
+
+     return allow;
 }
