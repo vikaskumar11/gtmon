@@ -74,7 +74,7 @@ void find_roles(role_set *r, char* usr_name, char* group_name)
 		    i = 0;
 		    if(0 == strcmp(group, group_name))
 		    {
-			  printf("group match\n");
+			 printf("group match\n");
 			 if(0 == strcmp (super_user, role))
 			      r->role[0] = super_user;
 			 else if(0 == strcmp (engineer, role))
@@ -109,34 +109,39 @@ int check_permissions(char *role, char *file_name, int operation)
      fp = fopen(role_file, "r");
      if(NULL == fp)
      {
-      perror("fopen");
-      exit(1);
+	  perror("fopen");
+	  exit(1);
      }     
 	
      printf("flags=[%d]\n", operation);     
 
      while(1)
      {
-        ret = fscanf(fp, "%s %d %d \n", fname, &op, &allow);
-        printf("%s %d %d", fname, op, allow);
-        if(0 == strcmp(fname, file_name))
-        {
-            printf("matched\n");
+	  ret = fscanf(fp, "%s %d %d \n", fname, &op, &allow);
+	  printf("%s %d %d", fname, op, allow);
+	  if(0 == strcmp(fname, file_name))
+	  {
+	       printf("matched\n");
 
-            if(operation == 4 && (op && 8))
-              return allow;
-            else if((op & operation))
-              return allow;
-        }	
+	       if((op & operation) == operation)
+		    return allow;
+/*
+	       if ((4 == operation) && (op && 7)) //(operation == 4 && (op && 8))
+		    return allow;
+	       else if ((op & operation) == operation) //((op & operation))
+	       return allow;*/
+	  }	
 
-        memset(fname, 0, 50);
-        if(EOF == ret)
-        {
-           if(operation == 4 && allow == 1)
-              return allow;
-           else
-             return -1;
-        }
+	  memset(fname, 0, 50);
+	  if(EOF == ret)
+	  {
+	       return -1;
+	       /*
+	       if(4 == operation) //(operation == 4 && allow == 1)
+		    return allow;
+	       else
+		    return -1;*/
+	  }
      }
 }
 
@@ -148,15 +153,15 @@ int is_access_allowed(char *filename, char *usr_name, char *grp_name, int flags)
      
 
      if(filename == NULL || usr_name == NULL || grp_name == NULL) {
-       printf("%s(): Invalid parameters\n", __FUNCTION__);
-       return 0;
+	  printf("%s(): Invalid parameters\n", __FUNCTION__);
+	  return 0;
      }
 
      memset(&r, 0, sizeof(r));
 
      find_roles(&r, usr_name, grp_name);
 
-     for(i = 0; i < 3; i++)
+     for(i = 0; i < NUM_ROLES; i++)
      {
 	  if(NULL != r.role[i])
 	  {
@@ -165,6 +170,7 @@ int is_access_allowed(char *filename, char *usr_name, char *grp_name, int flags)
 	       if(-1 == allow)
 	       {
 		    printf("Requested file [%s] not found in RBAC\n", filename);
+		    allow = 1;
 	       }
 	       else if (0 == allow)
 		    break;
