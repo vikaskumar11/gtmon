@@ -7,6 +7,7 @@
 	
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -27,7 +28,7 @@
 const int long_size = sizeof(long);
 
 void print_regs(struct user_regs_struct *regs) {
-  fprintf(stderr, "Register Contents: eax: %lu ebx: %ld ecx: %ld edx: %ld\n", 
+  fprintf(stderr, "Register Contents: eax: %lu ebx: %lu ecx: %lu edx: %lu\n", 
           regs->eax, regs->ebx, regs->ecx, regs->edx);
 
   return;
@@ -92,6 +93,57 @@ void getdata(pid_t child, long addr,char *str)
   }
 }
 
+int is_allowed(char *curr_dir, char *fname, char *usr_name, char *grp_name, int flags) {
+  char *tok = NULL, *saveptr = NULL;
+  char *local_path = NULL, *curr_path = NULL;
+  int cwd_len = 0, fname_len = 0, curr_len = 0;
+  int ret = 0;
+
+  cwd_len = strlen(curr_dir);
+  fname_len = strlen(fname);
+
+  if(strncmp(fname, curr_dir, cwd_len)) {
+    local_path = malloc(cwd_len + fname_len + 1);
+    strcpy(local_path, curr_dir);
+    strcpy(local_path+cwd_len, fname);
+  } else {
+    local_path = malloc(fname_len);
+    strcpy(local_path, fname);
+  }
+
+  printf("local_path: %s\n", local_path);
+  curr_path = malloc(strlen(local_path)+1);
+  
+  tok = strtok_r(local_path, "/", &saveptr);
+  if(tok == NULL)
+    goto fail;
+  
+  while(tok != NULL) {
+    curr_path[curr_len] = '/';
+    curr_len += 1;
+
+    strcpy(curr_path+curr_len, tok);
+    printf("Checking %s..\n", curr_path);
+
+    if(!(ret=is_access_allowed(tok, usr_name, grp_name, flags)) ||
+			      ret == -1) {
+      goto fail;
+    } 
+
+    tok = strtok_r(NULL, "/", &saveptr);
+  }
+
+  free(local_path);
+  free(curr_path);
+
+  return 1;
+
+fail:
+  free(local_path);
+  free(curr_path);
+  return 0;
+}
+
 void worker_thread(void *arg) {
   pid_t traced_proc;
   struct user_regs_struct regs;
@@ -100,14 +152,16 @@ void worker_thread(void *arg) {
   char in_clone_call = 0, in_open_call = 0;
   char in_uid_call = 0, in_gid_call = 0;
   char in_write_call = 0;
+  char in_cwd_call = 0;
   char trace_open = 0;
   int child_id = 0;
   void **child_stack = NULL;  
   struct group *grp_ptr;
   struct passwd *pwd_ptr;
   char *usr_name = NULL, *grp_name = NULL;
+  char *curr_dir = NULL;
   char str[80];
-    
+
   traced_proc = (pid_t)arg;
   printf("Tracing Proc: %d\n", traced_proc);
   
@@ -181,6 +235,11 @@ void worker_thread(void *arg) {
               */
               
               getdata(traced_proc, regs.ebx, str);
+
+              if(!strcmp(str, ".")) {
+                strcpy(str, curr_dir);
+              }
+
               fprintf(stderr, "Filename: %s ecx: %ld\n", str, regs.ecx);
 	      
               if((regs.ecx & O_CREAT) == O_CREAT) 
@@ -194,9 +253,8 @@ void worker_thread(void *arg) {
               else
                 flags = 0;
 
-	      printf("Flags: %d\n", flags);
-              if(!(ret=is_access_allowed(str, usr_name, grp_name, flags)) ||
-			ret == -1) {
+	            printf("Flags: %d\n", flags);
+              if(!is_allowed(curr_dir, str, usr_name, grp_name, flags)) {
                 setdata(traced_proc, regs.ebx, "1", 9);              
               }
 
@@ -275,6 +333,26 @@ void worker_thread(void *arg) {
               in_write_call = 1;
             } else {
               in_write_call = 0;
+            }
+          }
+        }
+        break;
+
+      case __NR_getcwd:
+        {
+          if(in_cwd_call == 0) {
+            in_cwd_call = 1;
+          } else {
+            in_cwd_call = 0;
+            
+            if(regs.eax > 0) {
+              if(curr_dir)
+                free(curr_dir);
+
+              curr_dir = NULL;
+              curr_dir = malloc(regs.eax);
+              getdata(traced_proc, regs.ebx, curr_dir);
+              printf("Current working dir: %s\n", curr_dir);
             }
           }
         }
