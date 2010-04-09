@@ -4,13 +4,4 @@
 /home/vikas/no_write 3 1
 /home/vikas/no_write/read.txt 1 1
 /home/vikas/allow_deny_read.txt 1 1
-hello.txt 3 1
-vikas.txt 3 1
-venkat_r.txt 2 1
-home 7 1
-venkat 7 1
-tmp 7 1
-tmp.txt 1 1
-text.txt 1 1
-text.txt 2 0
 

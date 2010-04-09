@@ -89,7 +89,7 @@ void getdata(pid_t child, long addr,char *str, int str_size)
     memcpy(laddr, data.chars, long_size);
    
     for(j = 0; j < long_size; j++) {
-      if(data.chars[i] == '\0')
+      if(data.chars[j] == '\0')
         break;
     }
 
