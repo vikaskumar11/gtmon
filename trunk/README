@@ -1,0 +1,59 @@
+Tested working with vsftp version 2.1.0 
+
+Compilation
+-----------
+
+make clean
+make
+
+Testing
+-------
+
+Following are steps to unit test the code :
+
+1. First, setup the configuration files for user-roles and roles-permissions. Currently, it is not possible to create new roles with the configuration, but everything else is configurable. The code supports three predefined roles, normal_user, engineer and super_user. 
+
+Files:
+
+rbac.txt
+For each role, the first line specifies the user names that are mapped to the role and the second line specifies the group names that are mapped to that role. Configure this file accordingly.
+
+For each user/group, create a <user_name>.txt file, that specifies the permissions for that user/group. The format of this is a tuple <filename, r/w permission, +/- access). A read permission is identified by 1, write permission by 2 and rw is 3. Positive access is identified by a 1 and negative access by 0. You must specify the "complete path" for each file and also specify permissions for each directory in the path. 
+
+2. Create files/folders in the home dir of the users for testing purposes. Inside each FTP directory that you are going to FTP, create an empty file named "1". Change the permission of this file as follows :
+
+chmod 0000 1
+
+This is the dummy file that we use for denying system calls.
+
+3. Start the vsftp daemon. Note the pid of the process.
+
+4. Execute ./gtmon <pid of vsftpd>
+
+5. Open a separate terminal for FTP. Do ftp localhost and authenticate the user. Use must observe from the logs that we start tracing 3 processes and the message FTP session started for user. 
+
+6. get/put the files and confirm the behavior with the specified configuration. Currently, you cannot specify the "complete path" of a file that you want to FTP. The code automatically detects the current dir and adds to your get/put file name for access checking. 
+
+Sample Configuration
+--------------------
+The attached sample configuration uses single user named vikas with home dir /home/vikas and two roles normal_user and engineer. To test the code for this sample configuration, please follow the steps below :
+
+1. Create a user named vikas with home dir /home/vikas. 
+2. Create the following files and directories
+
+Files:
+/home/vikas/read.txt
+/home/vikas/no_read.txt
+/home/vikas/allow_deny_read.txt
+/home/vikas/no_read/read.txt
+/home/vikas/no_write/read.txt
+
+Dir:
+/home/vikas/no_write
+/home/vikas/no_read
+
+In addition create an empty file named "1" with no zero permissions in each directory as specified in the previous section.
+
+Follow previous section to test. 
+
+
