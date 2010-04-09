@@ -18,6 +18,7 @@
 #include <malloc.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <grp.h>
 #include <pwd.h>
 
@@ -153,7 +154,7 @@ fail:
   return 0;
 }
 
-void worker_thread(void *arg) {
+int worker_thread(void *arg) {
   pid_t traced_proc;
   struct user_regs_struct regs;
   int status;
@@ -383,6 +384,8 @@ void worker_thread(void *arg) {
 child_cont:
     ptrace(PTRACE_SYSCALL, traced_proc, NULL, NULL);
   }
+
+  return 0;
 }
 
 
