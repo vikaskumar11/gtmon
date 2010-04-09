@@ -13,6 +13,10 @@ typedef struct _role_set
      char *role[NUM_ROLES];
 }role_set;
 
+#define ALLOW_READ   2
+#define ALLOW_WRITE  4
+#define DENY_READ    8
+#define DENY_WRITE   16
 
 void find_roles(role_set *r, char* usr_name, char* group_name)
 {
@@ -36,7 +40,7 @@ void find_roles(role_set *r, char* usr_name, char* group_name)
      {
 	  memset(role, 0, 50);
 	  fscanf(fp,"%s\n", role);
-	  printf("\ncurrent role = [%s]\n\n", role);
+	  //printf("\ncurrent role = [%s]\n\n", role);
 	  i = 0;
 
 	  while(1)
@@ -46,10 +50,10 @@ void find_roles(role_set *r, char* usr_name, char* group_name)
 	       {
 		    usr[i] = '\0';
 		    i = 0;
-		    printf("user =[%s] ", usr);
+		    //printf("user =[%s] ", usr);
 		    if(0 == strcmp(usr, usr_name))
 		    {
-			 printf("user match\n");
+			 //printf("user match\n");
 			 if(0 == strcmp (super_user, role))
 			      r->role[0] = super_user;
 			 else if(0 == strcmp (engineer, role))
@@ -70,11 +74,11 @@ void find_roles(role_set *r, char* usr_name, char* group_name)
 	       if( c == '\n' || c == ' ')
 	       {
 		    group[i] = '\0';
-		    printf("group =[%s] ", group);
+		    //printf("group =[%s] ", group);
 		    i = 0;
 		    if(0 == strcmp(group, group_name))
 		    {
-			 printf("group match\n");
+			 //printf("group match\n");
 			 if(0 == strcmp (super_user, role))
 			      r->role[0] = super_user;
 			 else if(0 == strcmp (engineer, role))
@@ -101,49 +105,51 @@ int check_permissions(char *role, char *file_name, int operation)
      char role_file[50] = "";
      char fname[50] = "";
      FILE *fp;
-     int ret;
-     int op, orig_op = 0;
+     int ret, result;
+     int op;
      int allow;
 
      sprintf(role_file, "%s.txt", role);
      fp = fopen(role_file, "r");
      if(NULL == fp)
      {
-	  perror("fopen");
-	  exit(1);
+       perror("fopen");
+       exit(1);
      }     
 	
-     printf("flags=[%d]\n", operation);     
+     //printf("flags=[%d]\n", operation);     
 
+     //printf("Checking Role %s..\n", role);
+
+     result = 0;
      while(1)
      {
-	  ret = fscanf(fp, "%s %d %d \n", fname, &op, &allow);
-	  printf("%s %d %d", fname, op, allow);
-	  if(0 == strcmp(fname, file_name))
-	  {
-	       printf("matched\n");
+        ret = fscanf(fp, "%s %d %d \n", fname, &op, &allow);
+        if(0 == strcmp(fname, file_name))
+        {
+             //printf("matched ");
+             //printf("%s %d %d\n", fname, op, allow);
 
-	       if((op & operation) == operation)
-		    return allow;
-         else 
-            return 0;
-/*
-	       if ((4 == operation) && (op && 7)) //(operation == 4 && (op && 8))
-		    return allow;
-	       else if ((op & operation) == operation) //((op & operation))
-	       return allow;*/
-	  }	
+             if((op & 1) == 1) {
+               result = result | (allow ? ALLOW_READ : DENY_READ);
+             }
 
-	  memset(fname, 0, 50);
-	  if(EOF == ret)
-	  {
-	       return -1;
-	       /*
-	       if(4 == operation) //(operation == 4 && allow == 1)
-		    return allow;
-	       else
-		    return -1;*/
-	  }
+             if((op & 2) == 2) {
+               result = result | (allow ? ALLOW_WRITE : DENY_WRITE) ;
+             }
+
+             return result;
+        }	
+
+        memset(fname, 0, 50);
+        if(EOF == ret)
+        {
+             printf("\t\tNo entry for requested file\n");
+             result |= ALLOW_READ;
+             result |= ALLOW_WRITE;
+
+             return result;
+        }
      }
 }
 
@@ -151,35 +157,65 @@ int is_access_allowed(char *filename, char *usr_name, char *grp_name, int flags)
 {
      int i;
      role_set r;
-     int allow;
+     int ret = 0, read = 0, write = 0;
      
 
      if(filename == NULL || usr_name == NULL || grp_name == NULL) {
-	  printf("%s(): Invalid parameters\n", __FUNCTION__);
-	  return 0;
+        printf("%s(): Invalid parameters\n", __FUNCTION__);
+        return 0;
      }
 
      memset(&r, 0, sizeof(r));
 
      find_roles(&r, usr_name, grp_name);
 
+     read = write = 0;
      for(i = 0; i < NUM_ROLES; i++)
      {
-	  if(NULL != r.role[i])
-	  {
-	       printf("\nrole=[%s]\n", r.role[i]);
-	       allow = check_permissions(r.role[i], filename, flags);
-	       if(-1 == allow)
-	       {
-		    printf("Requested file [%s] not found in RBAC\n", filename);
-		    allow = 1;
-	       }
-	       else if (0 == allow)
-		    break;
-	  }
+        if(NULL != r.role[i])
+        {
+             ret = 0;
+             printf("\tChecking allowed access for role=[%s]\n", r.role[i]);
+             ret = check_permissions(r.role[i], filename, flags);
+
+             if((ret & ALLOW_READ)) {
+               printf("\t\t->READ\n");
+               read = 1;
+             }
+             
+             if((ret & ALLOW_WRITE)) {
+               printf("\t\t->WRITE\n");
+               write = 1;
+             }
+
+             if(((flags & 1) == 1) && (ret & DENY_READ)) {
+               printf("\t\t->Deny READ\n");
+               printf("\tInsufficient read permission. Access denied to file %s\n", filename);
+               return 0;
+             }
+
+             if(((flags & 2) == 2) && (ret & DENY_WRITE)) {
+               printf("\t\t->Deny Write\n");
+               printf("\tInsufficient write permission. Access denied to file %s\n", filename);
+               return 0;
+             }
+
+        }
      }
 
-     printf("allowed = [%d]\n", allow);     
+     if(!read && ((flags & 1) == 1)) {
+       printf("\tInsufficient read permission. Access denied to file %s\n", filename);
+       return 0;
+     }
 
-     return allow;
+     if(!write && ((flags & 2) == 2)) {
+       printf("\tInsufficient write permission. Access denied to file %s\n", filename);
+       return 0;
+     }
+
+     printf("\tAccess granted to file %s\n", filename);
+
+     return 1;
+
+     //printf("allowed = [%d]\n", allow);     
 }
