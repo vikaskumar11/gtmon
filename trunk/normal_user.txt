@@ -4,6 +4,7 @@
 /home/vikas/no_read.txt 1 0
 /home/vikas/read 1 1
 /home/vikas/no_write 2 0
+/home/vikas/allow_deny_read.txt 1 0
 hello.txt 1 1
 vikas.txt 1 1
 venkat.txt 7 1

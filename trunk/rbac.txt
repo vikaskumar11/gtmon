@@ -1,11 +1,11 @@
 super_user
-ram mohan shyam alice vikas vivek
+ram mohan shyam alice vivek
 boss manager programmer
 
 engineer
-ram mohan shyam alice vivek venkat good
+ram mohan shyam alice vivek venkat good vikas
 boss manager assistant programmer
 
 normal_user
-ram mohan shyam alice venkat
+ram mohan shyam alice venkat vikas 
 worker boss manager coder programmer good

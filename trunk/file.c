@@ -125,6 +125,8 @@ int check_permissions(char *role, char *file_name, int operation)
 
 	       if((op & operation) == operation)
 		    return allow;
+         else 
+            return 0;
 /*
 	       if ((4 == operation) && (op && 7)) //(operation == 4 && (op && 8))
 		    return allow;
