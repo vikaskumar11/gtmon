@@ -25,6 +25,8 @@
 
 #define STACKSIZE 32768
 
+const char *flag_str[] = { "UNKNOWN", "READ", "WRITE", "READ_WRITE" };
+
 const int long_size = sizeof(long);
 
 void print_regs(struct user_regs_struct *regs) {
@@ -61,7 +63,7 @@ void setdata(pid_t child, long addr, char *str, int len)
 
 
 
-void getdata(pid_t child, long addr,char *str)
+void getdata(pid_t child, long addr,char *str, int str_size)
 {  
 
   char *laddr;
@@ -75,6 +77,11 @@ void getdata(pid_t child, long addr,char *str)
   i = 0;
   laddr = str;
   while(1) {
+    if(((laddr - str) + long_size) > str_size) {
+      perror("getdata: Buffer overflow\n");
+      return;
+    }
+
     data.val = ptrace(PTRACE_PEEKDATA,
                       child, addr + i * 4,
                       NULL);
@@ -103,15 +110,16 @@ int is_allowed(char *curr_dir, char *fname, char *usr_name, char *grp_name, int 
   fname_len = strlen(fname);
 
   if(strncmp(fname, curr_dir, cwd_len)) {
-    local_path = malloc(cwd_len + fname_len + 1);
+    local_path = malloc(cwd_len + fname_len + 2);
     strcpy(local_path, curr_dir);
-    strcpy(local_path+cwd_len, fname);
+    local_path[cwd_len] = '/';
+    strcpy(local_path+cwd_len+1, fname);
   } else {
-    local_path = malloc(fname_len);
+    local_path = malloc(fname_len+1);
     strcpy(local_path, fname);
   }
 
-  printf("local_path: %s\n", local_path);
+  //printf("local_path: %s\n", local_path);
   curr_path = malloc(strlen(local_path)+1);
   
   tok = strtok_r(local_path, "/", &saveptr);
@@ -123,13 +131,14 @@ int is_allowed(char *curr_dir, char *fname, char *usr_name, char *grp_name, int 
     curr_len += 1;
 
     strcpy(curr_path+curr_len, tok);
-    printf("Checking %s..\n", curr_path);
+    printf("Checking %s for permissions..\n", curr_path);
 
-    if(!(ret=is_access_allowed(tok, usr_name, grp_name, flags)) ||
+    if(!(ret=is_access_allowed(curr_path, usr_name, grp_name, flags)) ||
 			      ret == -1) {
       goto fail;
     } 
 
+    curr_len += strlen(tok);
     tok = strtok_r(NULL, "/", &saveptr);
   }
 
@@ -148,7 +157,6 @@ void worker_thread(void *arg) {
   pid_t traced_proc;
   struct user_regs_struct regs;
   int status;
-  long orig_eax;
   char in_clone_call = 0, in_open_call = 0;
   char in_uid_call = 0, in_gid_call = 0;
   char in_write_call = 0;
@@ -181,7 +189,7 @@ void worker_thread(void *arg) {
       if(WIFEXITED(status)) 
         break;     
       if(WIFSTOPPED(status)) {
-        if(WSTOPSIG(status) != SIGTRAP) 
+        if(WSTOPSIG(status) == SIGSTOP) 
           goto child_cont;
       }
     } else {
@@ -223,10 +231,9 @@ void worker_thread(void *arg) {
         {
           if(trace_open) {
             if(in_open_call == 0) {
-              int flags = 0, ret = 0;
+              int flags = 0;
 
               in_open_call = 1;
-              printf("Open:\n");              
 
               /* 
                  ebx: addr of filename
@@ -234,16 +241,15 @@ void worker_thread(void *arg) {
                  edx: mode
               */
               
-              getdata(traced_proc, regs.ebx, str);
+              getdata(traced_proc, regs.ebx, str, 80);
 
               if(!strcmp(str, ".")) {
                 strcpy(str, curr_dir);
               }
 
-              fprintf(stderr, "Filename: %s ecx: %ld\n", str, regs.ecx);
-	      
+              	      
               if((regs.ecx & O_CREAT) == O_CREAT) 
-                flags = 4;
+                flags = 2;
               else if((regs.ecx & O_RDWR) == O_RDWR)
                 flags = 3;
               else if((regs.ecx & O_WRONLY) == O_WRONLY)
@@ -253,9 +259,10 @@ void worker_thread(void *arg) {
               else
                 flags = 0;
 
-	            printf("Flags: %d\n", flags);
+              printf("Attempt to open file: %s for %s\n", str, flag_str[flags]);
+
               if(!is_allowed(curr_dir, str, usr_name, grp_name, flags)) {
-                setdata(traced_proc, regs.ebx, "1", 9);              
+                setdata(traced_proc, regs.ebx, "1", 2);              
               }
 
             } else {
@@ -272,7 +279,7 @@ void worker_thread(void *arg) {
             pwd_ptr = getpwuid(regs.ebx);
 
             if(pwd_ptr != NULL) {
-              printf("Proc: %d UID: %s ebx: %ld\n", traced_proc, pwd_ptr->pw_name, regs.ebx);
+              //printf("Proc: %d UID: %s\n", traced_proc, pwd_ptr->pw_name);
             }
             else {
               printf("UID does not exist\n");
@@ -323,11 +330,11 @@ void worker_thread(void *arg) {
         {
           if(!trace_open || in_write_call) {
             if(in_write_call == 0) {
-              getdata(traced_proc, regs.ecx, str);
+              getdata(traced_proc, regs.ecx, str, 80);
               
               if(strstr(str, "Login successful")) {           
                 trace_open = 1;
-                printf("PID: %d Write: %s\n", traced_proc, str);
+                printf("PID: %d FTP session started for user %s group %s\n", traced_proc, usr_name, grp_name);
               }
 
               in_write_call = 1;
@@ -346,13 +353,22 @@ void worker_thread(void *arg) {
             in_cwd_call = 0;
             
             if(regs.eax > 0) {
-              if(curr_dir)
+              unsigned int dir_size = 0;
+
+              if(curr_dir != NULL)
                 free(curr_dir);
 
+              dir_size = regs.eax;
+
+              /* Hack -- since getdata copies
+                 in multiples of 4 bytes */
+
+              dir_size += (long_size - (regs.eax % long_size));
+              
               curr_dir = NULL;
-              curr_dir = malloc(regs.eax);
-              getdata(traced_proc, regs.ebx, curr_dir);
-              printf("Current working dir: %s\n", curr_dir);
+              curr_dir = malloc(dir_size*sizeof(char));
+              getdata(traced_proc, regs.ebx, curr_dir, dir_size);
+              printf("Detecting Working Dir.. %s\n", curr_dir);
             }
           }
         }
